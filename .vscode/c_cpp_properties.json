@@ -1,0 +1,32 @@
+{
+    "configurations": [
+        {
+            "name": "Android NDK",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/jni/include/**",
+                "C:/Users/TokiHanako/AppData/Local/Android/Sdk/ndk/29.0.13599879/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/**",
+            ],
+            "defines": [
+                "__ANDROID__",
+                "__ARM_ARCH_8A__",
+                "__aarch64__",
+                "ANDROID_PLATFORM=android-24",
+                "APP_STL=c++_static"
+            ],
+            "compilerPath": "C:/Users/TokiHanako/AppData/Local/Android/Sdk/ndk/29.0.13599879/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android21-clang++.cmd",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-arm64",
+            "browse": {
+                "path": [
+                    "${workspaceFolder}",
+                    "C:/Users/TokiHanako/AppData/Local/Android/Sdk/ndk/29.0.13599879/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include"
+                ],
+                "limitSymbolsToIncludedHeaders": true,
+                "databaseFilename": ""
+            }
+        }
+    ],
+    "version": 4
+}
