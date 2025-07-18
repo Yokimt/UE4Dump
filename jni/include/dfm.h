@@ -3,7 +3,7 @@
 #include "module.hpp"
 #include <filesystem>
 #include <map>
-inline DumpInfo g_dumpInfo;
+extern DumpInfo g_dumpInfo;
 // ================= 初始化函数 =================
 void DumpInfo::InitOffsets()
 {
@@ -340,7 +340,6 @@ void DumpInfo::InitUEnum0ffset()
                 for (int i = 0; i < 6; i++)
                 {
                     std::string name = g_FNamePool.GetName(MemoryReader::Read<uint32_t>(names.Data + i * size_offset + name_offset));
-                    printf("name:%s\n", name.c_str());
                     if (name != referenceItems[i])
                     {
                         allmatch = false;
@@ -355,17 +354,16 @@ void DumpInfo::InitUEnum0ffset()
                         for (size_t i = 0; i < 6; i++)
                         {
                             int value = MemoryReader::Read<int>(names.Data + i * size_offset + value_offset);
-                            if( value != i)
+                            if (value != i)
                             {
                                 allfound = false;
                                 break;
                             }
                         }
-                        if(allfound)
+                        if (allfound)
                         {
                             break; // 找到所有值匹配，退出循环
                         }
-
                     }
                     UEEnum::SetNameOffset(name_offset);
                     UEEnum::SetValueOffset(value_offset);
@@ -547,7 +545,7 @@ void DumpInfo::DumpStruct(UObject addr, string out, unordered_set<string> &Basic
 
     // 收集所有依赖的类型头文件
     unordered_set<string> headerIncludes;
-    headerIncludes.insert("\"BasicTypes.h\""); // 公共基础头文件
+    headerIncludes.insert("BasicTypes"); // 公共基础头文件
     UEClass SuperStruct = tmp.GetSuperStruct().Cast<UEClass>();
     if (SuperStruct.IsValid())
     {
@@ -684,6 +682,39 @@ void DumpInfo::DumpStruct(UObject addr, string out, unordered_set<string> &Basic
     Struct << "};\n";
     Struct.close();
 }
+void DumpInfo::DumpEnum(UObject addr, string out, unordered_set<string> &BasicEngineTypes)
+{
+    UEEnum tmp = addr.Cast<UEEnum>();
+    string Name = addr.GetName();
+    if (Name.empty() || !DumpUtils::IsBasicAscii(Name)) return;
+    ofstream Enum(out + "/" + Name + ".h");
+    if (!Enum.is_open()) return;
+    // 写入头文件包含
+    Enum << "#pragma once\n\n";
+    Enum << "#include \"BasicTypes.h\"\n\n";
+    Enum << "/" << tmp.Cast<UObject>().GetFullName() << "\n";
+    Enum << "enum " << Name <<endl;
+    Enum << "{\n";
+    // 遍历枚举值
+    std::vector<std::pair<std::string,int>>  enumValues = tmp.GetNameList(); // 存储枚举值和对应的整数
+    
+    for (const auto &pair : enumValues)
+    {
+        const std::string &tmp_name = pair.first;
+        int value = pair.second;
+        size_t pos = tmp_name.find("::");
+        string name = (pos != std::string::npos) ? tmp_name.substr(pos + 2) : tmp_name; // 去除命名空间前缀
+        // 格式化枚举行
+        Enum << "    " << name;
+        if (name.size() < 30)
+        {
+            Enum <<std::left <<std::setw(30 - name.size()) << std::setfill(' ') << "";
+        }
+        Enum << " = " << value << ",\n";
+    }
+    Enum << "};\n";
+    Enum.close();
+}
 void DumpInfo::DumpSDK(string out)
 {
     if (!std::filesystem::exists(out))
@@ -712,6 +743,7 @@ void DumpInfo::DumpSDK(string out)
     g_dumpInfo.UScriptStructStatic = UEScriptStruct::StaticClass();
     g_dumpInfo.UObjectStatic = UObject::StaticClass();
     g_dumpInfo.AActorStatic = AActor::StaticClass();
+    g_dumpInfo.UEEnumStatic = UEEnum::StaticClass();
 
     uint32_t oCount = MemoryReader::Read<uint32_t>(g_dumpInfo.UObjectAddress + g_dumpInfo.offsets.NumElements);
     cout << "Objects Counts: " << std::dec << oCount << endl;
@@ -728,6 +760,10 @@ void DumpInfo::DumpSDK(string out)
             else if (DumpUtils::IsA(uobj, DumpUtils::UScriptStructFlag))
             {
                 DumpInfo::DumpStruct(uobj, out + "/sdk", BasicEngineTypes);
+            }
+            else if (DumpUtils::IsA(uobj, DumpUtils::UEEnumFlag))
+            {
+                DumpInfo::DumpEnum(uobj, out + "/sdk", BasicEngineTypes);
             }
             // TODO dump enum func
             Object << "{" << std::right << std::setw(6) << std::setfill('0') << i << "}\t[" << uobj.GetAddress() << "]\t" << uobj.GetName() << "\t" << uobj.GetFullName() << endl;

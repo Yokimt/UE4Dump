@@ -324,22 +324,25 @@ public:
     };
     FNameArray GetNames() const { return Read<FNameArray>(NamesOffset); }
     int GetValue()const { return Read<int>(ValueOffset); }
-    std::vector<std::string> GetNameList() const
+    std::vector<std::pair<std::string,int>> GetNameList() const
     {
         FNameArray names = GetNames();
-        std::vector<std::string> nameList;
+        std::vector<std::pair<std::string,int>> nameList;
         nameList.reserve(names.Count);
         for (int32_t i = 0; i < names.Count; ++i)
         {
             std::string name = g_FNamePool.GetName(MemoryReader::Read<uint32_t>(names.Data + i * SizeOffset+NameOffset));
+            int value = MemoryReader::Read<uint32_t>(names.Data + i * SizeOffset+ValueOffset);
+
             // printf("Name: %s, Value: %d\n", name.c_str(), value);
             if (!name.empty())
             {
-                nameList.push_back(name);
+                nameList.push_back(std::pair<std::string,int>(name, value));
             }
         }
         return nameList;
     }
+    static UEEnum StaticClass();
 };
 
 // 8. UEScriptStruct
