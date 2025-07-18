@@ -17,6 +17,7 @@ public:
     void DumpSDK(string out);
     void DumpClass(UObject addr, string out, unordered_set<string> &BasicEngineTypes);
     void DumpStruct(UObject addr, string out, unordered_set<string> &BasicEngineTypes);
+    void DumpEnum(UObject addr, string out, unordered_set<string> &BasicEngineTypes);
     // 偏移信息
     struct OffsetInfo
     {
@@ -28,7 +29,7 @@ public:
 
     // 内存地址
     uint64_t GName = 0x1ADF9540;
-    uint64_t GWorld =  0x1B109978;
+    uint64_t GWorld = 0x1B109978;
     uint64_t UObjectOffset = 0x1A227BB8;
     uint16_t TUObjectArrayOffset = 0x20;
     uint64_t UObjectAddress = 0;
@@ -40,6 +41,7 @@ public:
     UStruct UStructStatic;
     UEScriptStruct UScriptStructStatic;
     AActor AActorStatic;
+    UEEnum UEEnumStatic;
 
 private:
     void InitUObjectBaseOffset();
@@ -51,46 +53,45 @@ private:
 };
 
 // 全局上下文
-extern DumpInfo g_dumpInfo;
+inline DumpInfo g_dumpInfo;
 
-class ProgressBar {
-    public:
-        ProgressBar(int total, int bar_width = 50) 
-            : total_(total), bar_width_(bar_width) {}
-        
-        void update(int current) {
-            // 计算进度百分比
-            float percentage = static_cast<float>(current) / total_ * 100.0f;
-            
-            // 计算已完成部分长度
-            int filled_width = static_cast<int>(bar_width_ * percentage / 100.0f);
-            
-            // 构建进度条字符串
-            std::string bar = "[";
-            bar.append(filled_width, '=');  // 已完成部分
-            bar.append(bar_width_ - filled_width, ' ');  // 未完成部分
-            bar += "]";
-            
-            // 输出进度信息
-            std::cout << "\r" << bar
-                      << " " << std::setw(3) << static_cast<int>(percentage) << "%"
-                      << " (" << std::setw(3) << current << "/" << total_ << ")"
-                      << std::flush;
-        }
-        
-        void finish() {
-            update(total_);
-            std::cout << "\nCompleted!" << std::endl;
-        }
-    
-    private:
-        int total_;
-        int bar_width_;
-    };
-    
+class ProgressBar
+{
+public:
+    ProgressBar(int total, int bar_width = 50)
+        : total_(total), bar_width_(bar_width) {}
 
+    void update(int current)
+    {
+        // 计算进度百分比
+        float percentage = static_cast<float>(current) / total_ * 100.0f;
 
+        // 计算已完成部分长度
+        int filled_width = static_cast<int>(bar_width_ * percentage / 100.0f);
 
+        // 构建进度条字符串
+        std::string bar = "[";
+        bar.append(filled_width, '=');              // 已完成部分
+        bar.append(bar_width_ - filled_width, ' '); // 未完成部分
+        bar += "]";
+
+        // 输出进度信息
+        std::cout << "\r" << bar
+                  << " " << std::setw(3) << static_cast<int>(percentage) << "%"
+                  << " (" << std::setw(3) << current << "/" << total_ << ")"
+                  << std::flush;
+    }
+
+    void finish()
+    {
+        update(total_);
+        std::cout << "\nCompleted!" << std::endl;
+    }
+
+private:
+    int total_;
+    int bar_width_;
+};
 
 string BasicTypes_h = R"(// BasicTypes.h
 #pragma once
@@ -133,6 +134,7 @@ namespace DumpUtils
         UObjectFlag,
         UStructFlag,
         UScriptStructFlag,
+        UEEnumFlag,
         AActorFlag,
     };
     bool IsUnvalid(uint64_t addr)
@@ -143,8 +145,8 @@ namespace DumpUtils
     {
         uint64_t arrayAddr = MemoryReader::Read<uint64_t>(g_dumpInfo.UObjectAddress + g_dumpInfo.TUObjectArrayOffset);
         uint64_t chunkAddr = MemoryReader::Read<uint64_t>(arrayAddr + (index / g_dumpInfo.offsets.ChunkSize) * 8);
-        uint64_t objectAddr =  MemoryReader::Read<uint64_t>(chunkAddr + (index % g_dumpInfo.offsets.ChunkSize) * g_dumpInfo.offsets.FUObjectItemSize);
-        return UObject(objectAddr,index);
+        uint64_t objectAddr = MemoryReader::Read<uint64_t>(chunkAddr + (index % g_dumpInfo.offsets.ChunkSize) * g_dumpInfo.offsets.FUObjectItemSize);
+        return UObject(objectAddr, index);
     }
     UObject FindObject(const string &name)
     {
@@ -184,6 +186,9 @@ namespace DumpUtils
             break;
         case AActorFlag:
             cmp = g_dumpInfo.AActorStatic.GetAddress();
+            break;
+        case UEEnumFlag:
+            cmp = g_dumpInfo.UEEnumStatic.GetAddress();
             break;
         }
 
@@ -229,17 +234,21 @@ namespace DumpUtils
         }
         return "F" + Name;
     }
+    void trimLeadingAlgorithm(std::string &str)
+    {
+        auto it = std::find_if(str.begin(), str.end(), [](char c)
+                               { return !std::isspace(static_cast<unsigned char>(c)); });
+        str.erase(str.begin(), it);
+    }
     string ExtractBaseType(const string &typeStr)
     {
         if (typeStr.empty())
             return "";
-
         // 处理枚举类
-        if (typeStr.find("enum class") == 0)
+        if (typeStr.find("enum ") != string::npos)
         {
             return typeStr;
         }
-
         // 处理模板类型
         if (typeStr.find('<') != string::npos)
         {
@@ -284,7 +293,7 @@ namespace DumpUtils
         // 引擎基础类型已在公共头文件中定义
         static const unordered_set<string> engineTypes = {
             "FName", "FString", "FText", "FDelegate", "FMulticastDelegate",
-            "TArray", "TMap", "TSet", "TWeakObjectPtr", "TSoftObjectPtr", "FIntPoint","FMulticastInlineDelegate","FMulticastSparseDelegate"};
+            "TArray", "TMap", "TSet", "TWeakObjectPtr", "TSoftObjectPtr", "FIntPoint", "FMulticastInlineDelegate", "FMulticastSparseDelegate"};
 
         // 1. 跳过基本类型
         if (basicTypes.count(baseType))
@@ -293,82 +302,80 @@ namespace DumpUtils
         {
             return;
         }
-        // 2. 处理枚举类
-        if (baseType.find("enum class") == 0)
-        {
-            // 提取枚举名
-            // size_t pos = baseType.find_last_of(' ');
-            // if (pos != string::npos)
-            // {
-            //     string enumName = baseType.substr(pos + 1);
-            //     if (!enumName.empty())
-            //     {
-            //         BasicEngineTypes.insert("enum class " + enumName + ";");
-            //     }
-            // }
-            return;
-        }
-
         // 3. 递归处理模板类型
-        auto processTemplate = [&](const string& type) {
+        auto processTemplate = [&](const string &type)
+        {
             size_t start = type.find('<');
             size_t end = type.rfind('>');
-            
+
             // 验证模板格式有效性
-            if (start == string::npos || end == string::npos || start >= end) {
+            if (start == string::npos || end == string::npos || start >= end)
+            {
                 return;
             }
-            
+
             string params = type.substr(start + 1, end - start - 1);
-            
+
             // 处理空模板参数
-            if (params.empty()) {
+            if (params.empty())
+            {
                 return;
             }
-            
+
             // 分割模板参数（增加嵌套深度跟踪）
             vector<string> templateParams;
             int depth = 0;
             size_t last = 0;
             bool inQuotes = false; // 可选：处理带引号的参数
-            
-            for (size_t i = 0; i < params.length(); ++i) {
+
+            for (size_t i = 0; i < params.length(); ++i)
+            {
                 char c = params[i];
-                
+
                 // 处理引号（可选）
-                if (c == '"') inQuotes = !inQuotes;
-                
-                if (!inQuotes) {
-                    if (c == '<') depth++;
-                    else if (c == '>') depth--;
-                    else if (c == ',' && depth == 0) {
+                if (c == '"')
+                    inQuotes = !inQuotes;
+
+                if (!inQuotes)
+                {
+                    if (c == '<')
+                        depth++;
+                    else if (c == '>')
+                        depth--;
+                    else if (c == ',' && depth == 0)
+                    {
                         // 提取有效参数段
                         string param = params.substr(last, i - last);
-                        if (!param.empty()) {
+                        if (!param.empty())
+                        {
                             templateParams.push_back(param);
                         }
                         last = i + 1;
                     }
                 }
             }
-            
+
             // 添加最后一个参数
             string lastParam = params.substr(last);
-            if (!lastParam.empty()) {
+            if (!lastParam.empty())
+            {
                 templateParams.push_back(lastParam);
             }
-            
+
             // 递归处理每个参数
-            for (auto& param : templateParams) {
+            for (auto &param : templateParams)
+            {
                 // 清理参数：移除首尾空格
                 size_t first = param.find_first_not_of(" ");
                 size_t last = param.find_last_not_of(" ");
-                if (first != string::npos && last != string::npos) {
+                if (first != string::npos && last != string::npos)
+                {
                     param = param.substr(first, (last - first + 1));
                 }
-                
+
                 // 跳过空参数
-                if (!param.empty()) {
+                if (!param.empty())
+                {
                     NeedsHeader(param, BasicEngineTypes, headerIncludes);
                 }
             }
@@ -378,32 +385,14 @@ namespace DumpUtils
         if (baseType.find('<') != string::npos)
         {
             processTemplate(baseType);
-            
+
             // 如果是已知模板类型则跳过
             if (baseType.find("TArray") == 0 || baseType.find("TMap") == 0 ||
-                baseType.find("TSet") == 0||baseType.find("TSoftObjectPtr") == 0||baseType.find("TWeakObjectPtr") == 0)
+                baseType.find("TSet") == 0 || baseType.find("TSoftObjectPtr") == 0 || baseType.find("TWeakObjectPtr") == 0)
             {
                 return;
             }
         }
-
-        // 5. 处理自定义类型
-        // if (baseType[0] == 'F')
-        // {
-        //     string type = baseType;
-        //     size_t ptr = type.find("*");
-        //     if (ptr != string::npos)
-        //     {
-        //         type = type.substr(0, ptr);
-        //     }
-        //     BasicEngineTypes.insert("class " + type + " {};");
-
-            // if (!engineTypes.count(baseType) && !basicTypes.count(baseType))
-            // {
-            //     headerIncludes.insert("\"" + baseType + "_class.h\"");
-            // }
-        //     return;
-        // }
 
         // 6. 默认处理：非基本/非引擎类型需要头文件
         if (!engineTypes.count(baseType) && !basicTypes.count(baseType))
@@ -414,18 +403,24 @@ namespace DumpUtils
             {
                 type = type.substr(0, ptr);
             }
+            size_t enumpos = type.find("enum ");
+            if (enumpos != string::npos)
+            {
+                type = type.substr(5);
+                trimLeadingAlgorithm(type);
+            }
             headerIncludes.insert(type);
         }
     }
+
 }
 
-
-//UnrealObjects中的一些实现
+// UnrealObjects中的一些实现
 
 std::string UObject::GetFullName() const
 {
     std::string path = GetName();
-    if (path == "" || path == "None"||!DumpUtils::IsBasicAscii(path))
+    if (path == "" || path == "None" || !DumpUtils::IsBasicAscii(path))
         return std::string();
     UObject Outer = GetOuter();
     while (Outer.IsValid())
@@ -517,7 +512,7 @@ std::string UField::GetType()
 
     if (Name == "MapProperty")
     {
-        return "TMap<" +this->Cast<UEMapProperty>().GetKeyProperty().GetType()+ ","+this->Cast<UEMapProperty>().GetValueProperty().GetType()+">";
+        return "TMap<" + this->Cast<UEMapProperty>().GetKeyProperty().GetType() + "," + this->Cast<UEMapProperty>().GetValueProperty().GetType() + ">";
     }
     if (Name == "SetProperty")
     {
@@ -525,7 +520,7 @@ std::string UField::GetType()
     }
     if (Name == "EnumProperty")
     {
-        return "enum class " +this->Cast<UEEnumProperty>().GetElementProperty().GetName();
+        return "enum " + this->Cast<UEEnumProperty>().GetElementProperty().GetName();
     }
     if (Name == "BoolProperty")
     {
@@ -539,16 +534,16 @@ std::string UField::GetType()
     {
         UObject obj = this->Cast<UEByteProperty>().GetEnum();
         if (obj.IsValid())
-            return "enum class " +obj.GetName();
+            return "enum  " + obj.GetName();
         return "char";
     }
     if (Name == "ClassProperty")
     {
-        return DumpUtils::GetCppName(this->Cast<UEClassProperty>().GetMetaClass())+ "*";
+        return DumpUtils::GetCppName(this->Cast<UEClassProperty>().GetMetaClass()) + "*";
     }
     if (Name == "StructProperty")
     {
-        return DumpUtils::GetCppName( this->Cast<UStructProperty>().GetStruct());
+        return DumpUtils::GetCppName(this->Cast<UStructProperty>().GetStruct());
     }
     if (Name == "InterfaceProperty")
     {
@@ -556,11 +551,11 @@ std::string UField::GetType()
     }
     if (Name == "ObjectProperty")
     {
-        return  DumpUtils::GetCppName(this->Cast<UEObjectProperty>().GetPropertyClass())+"*";
+        return DumpUtils::GetCppName(this->Cast<UEObjectProperty>().GetPropertyClass()) + "*";
     }
     if (Name == "ArrayProperty")
     {
-        return "TArray<" +this->Cast<UEArrayProperty>().GetInner().GetType()  + ">";
+        return "TArray<" + this->Cast<UEArrayProperty>().GetInner().GetType() + ">";
     }
     if (Name == "WeakObjectProperty")
     {
@@ -573,7 +568,6 @@ std::string UField::GetType()
 
     return DumpUtils::GetCppName(this->Cast<UEObjectProperty>().GetPropertyClass()) + "*";
 }
-
 
 UStruct UStruct::StaticClass()
 {
@@ -591,4 +585,9 @@ UObject UObject::StaticClass()
 AActor AActor::StaticClass()
 {
     return DumpUtils::FindObject("Actor").Cast<AActor>();
+}
+
+UEEnum UEEnum::StaticClass()
+{
+    return DumpUtils::FindObject("Enum").Cast<UEEnum>();
 }

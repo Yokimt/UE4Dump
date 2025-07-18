@@ -305,10 +305,17 @@ public:
 class UEEnum : public UField
 {
 private:
-    static inline int32_t NamesOffset = 0x30;
+    static inline int32_t NameOffset = 0x0;
+    static inline int32_t ValueOffset = 0x8;
+    static inline int32_t SizeOffset = 0x10;
+    static inline int32_t NamesOffset = 0x50;
 
 public:
     using UField::UField;
+    static void SetNameOffset(int32_t offset) { NameOffset = offset; }
+    static void SetValueOffset(int32_t offset) { ValueOffset = offset; }
+    static void SetSizeOffset(int32_t offset) { SizeOffset = offset; }
+    static void SetNamesOffset(int32_t offset) { NamesOffset = offset; }
     struct FNameArray
     {
         uint64_t Data;
@@ -316,7 +323,26 @@ public:
         int32_t Max;
     };
     FNameArray GetNames() const { return Read<FNameArray>(NamesOffset); }
-    std::vector<std::string> GetNameList() const;
+    int GetValue()const { return Read<int>(ValueOffset); }
+    std::vector<std::pair<std::string,int>> GetNameList() const
+    {
+        FNameArray names = GetNames();
+        std::vector<std::pair<std::string,int>> nameList;
+        nameList.reserve(names.Count);
+        for (int32_t i = 0; i < names.Count; ++i)
+        {
+            std::string name = g_FNamePool.GetName(MemoryReader::Read<uint32_t>(names.Data + i * SizeOffset+NameOffset));
+            int value = MemoryReader::Read<uint32_t>(names.Data + i * SizeOffset+ValueOffset);
+
+            // printf("Name: %s, Value: %d\n", name.c_str(), value);
+            if (!name.empty())
+            {
+                nameList.push_back(std::pair<std::string,int>(name, value));
+            }
+        }
+        return nameList;
+    }
+    static UEEnum StaticClass();
 };
 
 // 8. UEScriptStruct
