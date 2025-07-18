@@ -235,7 +235,7 @@ namespace DumpUtils
             return "";
 
         // 处理枚举类
-        if (typeStr.find("enum class") == 0)
+        if (typeStr.find("enum ") == 0)
         {
             return typeStr;
         }
@@ -525,7 +525,7 @@ std::string UField::GetType()
     }
     if (Name == "EnumProperty")
     {
-        return "enum class " +this->Cast<UEEnumProperty>().GetElementProperty().GetName();
+        return "enum " +this->Cast<UEEnumProperty>().GetElementProperty().GetName();
     }
     if (Name == "BoolProperty")
     {
@@ -539,7 +539,7 @@ std::string UField::GetType()
     {
         UObject obj = this->Cast<UEByteProperty>().GetEnum();
         if (obj.IsValid())
-            return "enum class " +obj.GetName();
+            return "enum  " +obj.GetName();
         return "char";
     }
     if (Name == "ClassProperty")

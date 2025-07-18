@@ -2,6 +2,7 @@
 #pragma once
 #include "module.hpp"
 #include <filesystem>
+#include <map>
 inline DumpInfo g_dumpInfo;
 // ================= 初始化函数 =================
 void DumpInfo::InitOffsets()
@@ -18,8 +19,9 @@ void DumpInfo::InitOffsets()
     UObjectAddress = MemoryReader::Read<uint64_t>(base + UObjectOffset);
     InitUObjectBaseOffset();
     InitUStructFFieldOffset();
-    // InitUEnum0ffset();
+    InitUEnum0ffset();
     InitFProperty0ffset();
+    // InitFFunc();
 }
 
 // ================= 初始化实现 =================
@@ -71,7 +73,7 @@ FoundNamePrivate:
             UObject objAddr = DumpUtils::GetUObjectFromID(idx);
             if (!objAddr.IsValid())
                 continue;
-            UEClass classAddr =UEClass(MemoryReader::Read<uint64_t>(objAddr.GetAddress() + offset),idx);
+            UEClass classAddr = UEClass(MemoryReader::Read<uint64_t>(objAddr.GetAddress() + offset), idx);
             string name = classAddr.GetName();
             if (name == "Package")
             {
@@ -88,7 +90,7 @@ FoundClassPrivate:
         return;
     for (int offset = 0; offset < 2000; offset += 2)
     {
-        UEClass outer =UEClass(MemoryReader::Read<uint64_t>(objectClass.GetAddress() + offset),0) ;
+        UEClass outer = UEClass(MemoryReader::Read<uint64_t>(objectClass.GetAddress() + offset), 0);
         if (outer.IsValid() && outer == coreUObject)
         {
             UObject::SetOuterOffset(offset);
@@ -202,21 +204,19 @@ FindPropertiesSize:
     }
 }
 
-
-
 void DumpInfo::InitFProperty0ffset()
 {
     // 1. 准备已知属性对象
     const UObject vector = DumpUtils::FindObject("Vector");
     const UObject gameState = DumpUtils::FindObject("GameStateBase");
 
-    if (!vector.IsValid()  || !gameState.IsValid())
+    if (!vector.IsValid() || !gameState.IsValid())
     {
         printf("[InitFProperty0ffset] Failed to find required objects.\n");
         return;
     }
     // 2. 获取已知属性字段
-    UField vectorX, vectorY , vectorZ ;
+    UField vectorX, vectorY, vectorZ;
     UField gameStateArray;
 
     // 遍历Vector的属性
@@ -233,8 +233,8 @@ void DumpInfo::InitFProperty0ffset()
 
     // 遍历GameStateBase的属性寻找数组属性
     for (UField prop = gameState.Cast<UStruct>().GetChildProperties(); prop.IsValid(); prop = prop.GetNext())
-    {    
-        if (prop.GetClassName()== "ArrayProperty")
+    {
+        if (prop.GetClassName() == "ArrayProperty")
         {
             // std::cout<<"GetClassName"<<prop.GetClassName()<<std::endl;
             gameStateArray = prop;
@@ -248,8 +248,8 @@ void DumpInfo::InitFProperty0ffset()
         for (int offset = 0; offset < 2000; offset += 2)
         {
             uint32_t xVal = MemoryReader::Read<uint32_t>(vectorX.GetAddress() + offset);
-            uint32_t yVal = MemoryReader::Read<uint32_t>(vectorY.GetAddress()  + offset);
-            uint32_t zVal = MemoryReader::Read<uint32_t>(vectorZ.GetAddress()  + offset);
+            uint32_t yVal = MemoryReader::Read<uint32_t>(vectorY.GetAddress() + offset);
+            uint32_t zVal = MemoryReader::Read<uint32_t>(vectorZ.GetAddress() + offset);
 
             if (xVal == 0 && yVal == 4 && zVal == 8)
             {
@@ -265,7 +265,7 @@ void DumpInfo::InitFProperty0ffset()
         { // 步进8字节（指针大小）
             // 读取可能的 UClass 指针
             uint64_t innerPtr = MemoryReader::Read<uint64_t>(gameStateArray.GetAddress() + offset);
-            string innerClassName = UEProperty(innerPtr,-1).GetName();
+            string innerClassName = UEProperty(innerPtr, -1).GetName();
             if (innerClassName == "PlayerArray")
             {
                 UEProperty::SetChildClassOffset(offset);
@@ -284,7 +284,7 @@ void DumpInfo::InitFProperty0ffset()
             if (innerPtr)
             {
                 // 验证innerPtr是否指向有效的FField对象
-                string className = UField(innerPtr,-1).GetClassName();
+                string className = UField(innerPtr, -1).GetClassName();
 
                 if (!className.empty() && className.find("FloatProperty") != string::npos)
                 {
@@ -314,16 +314,76 @@ void DumpInfo::InitFProperty0ffset()
     // 输出定位结果
 }
 
-//TODO
 void DumpInfo::InitUEnum0ffset()
 {
+    // 1. 准备已知枚举对象和参考值
+    const UObject collisionChannelEnum = DumpUtils::FindObject("ECollisionChannel");
+    if (!collisionChannelEnum.IsValid())
+    {
+        printf("[InitUEnum0ffset] Failed to find ECollisionChannel enum\n");
+        return;
+    }
+    string referenceItems[6] = {"ECC_WorldStatic", "ECC_WorldDynamic", "ECC_Pawn", "ECC_Visibility", "ECC_Camera", "ECC_PhysicsBody"};
+    // collisionChannelEnum.Cast<UEEnum>().GetNameList();
+    int name_offset = 0;
+    int value_offset = 0;
+    int size_offset = 0;
+    int names_offset = 0;
+    for (names_offset = 0; names_offset < 200; names_offset += 2)
+    {
+        UEEnum::FNameArray names = MemoryReader::Read<UEEnum::FNameArray>(collisionChannelEnum.GetAddress() + names_offset);
+        for (size_offset = 0; size_offset < 100; size_offset += 2)
+        {
+            for (name_offset = 0; name_offset < 100; name_offset += 2)
+            {
+                bool allmatch = true;
+                for (int i = 0; i < 6; i++)
+                {
+                    std::string name = g_FNamePool.GetName(MemoryReader::Read<uint32_t>(names.Data + i * size_offset + name_offset));
+                    printf("name:%s\n", name.c_str());
+                    if (name != referenceItems[i])
+                    {
+                        allmatch = false;
+                        break;
+                    }
+                }
+                if (allmatch)
+                {
+                    for (value_offset = 0; value_offset < 100; value_offset += 2)
+                    {
+                        bool allfound = true;
+                        for (size_t i = 0; i < 6; i++)
+                        {
+                            int value = MemoryReader::Read<int>(names.Data + i * size_offset + value_offset);
+                            if( value != i)
+                            {
+                                allfound = false;
+                                break;
+                            }
+                        }
+                        if(allfound)
+                        {
+                            break; // 找到所有值匹配，退出循环
+                        }
+
+                    }
+                    UEEnum::SetNameOffset(name_offset);
+                    UEEnum::SetValueOffset(value_offset);
+                    UEEnum::SetSizeOffset(size_offset);
+                    UEEnum::SetNamesOffset(names_offset);
+                    return; // 成功找到偏移，退出函数
+                }
+            }
+        }
+    }
 }
+// TODO
 void DumpInfo::InitFFunc()
 {
 }
 // ================= SDK生成 =================
 
-void DumpInfo::DumpClass(UObject addr, string out,unordered_set<string> &BasicEngineTypes)
+void DumpInfo::DumpClass(UObject addr, string out, unordered_set<string> &BasicEngineTypes)
 {
     UEClass tmp = addr.Cast<UEClass>();
     string CppName = DumpUtils::GetCppName(tmp);
@@ -338,67 +398,75 @@ void DumpInfo::DumpClass(UObject addr, string out,unordered_set<string> &BasicEn
     unordered_set<string> headerIncludes;
     headerIncludes.insert("BasicTypes"); // 公共基础头文件
     UEClass SuperStruct = tmp.GetSuperStruct().Cast<UEClass>();
-    if (SuperStruct.IsValid()) {
+    if (SuperStruct.IsValid())
+    {
         string superType = DumpUtils::GetCppName(SuperStruct);
         string baseType = DumpUtils::ExtractBaseType(superType);
-        
+
         // 基类总是需要包含头文件
-        if (!baseType.empty()) {
-            headerIncludes.insert( baseType);
+        if (!baseType.empty())
+        {
+            headerIncludes.insert(baseType);
         }
     }
     // 遍历属性收集类型
     vector<pair<string, UField>> properties; // <类型, 属性地址>
-    for (UField temp = tmp.GetChildProperties(); temp.IsValid(); temp =temp.GetNext()) {
+    for (UField temp = tmp.GetChildProperties(); temp.IsValid(); temp = temp.GetNext())
+    {
         string type = temp.GetType();
         properties.push_back({type, temp});
 
         // 提取基础类型名
         string baseType = DumpUtils::ExtractBaseType(type);
-        DumpUtils::NeedsHeader(baseType,BasicEngineTypes,headerIncludes);
+        DumpUtils::NeedsHeader(baseType, BasicEngineTypes, headerIncludes);
     }
 
     // 写入头文件包含
     Class << "#pragma once\n\n";
-    for (const auto& include : headerIncludes) {
-        if(include.empty())
+    for (const auto &include : headerIncludes)
+    {
+        if (include.empty())
         {
             continue;
         }
         Class << "#include  \"" << include << ".h\"\n";
     }
     Class << "\n";
-    
+
     // 写入类头部信息
     Class << "// Class: " << tmp.Cast<UObject>().GetFullName() << "\n";
     Class << "// Size: 0x" << hex << tmp.GetPropertySize() << dec << "\n\n";
-    
+
     Class << "class " << CppName;
-    if (SuperStruct.IsValid()) {
+    if (SuperStruct.IsValid())
+    {
         Class << " : public " << DumpUtils::GetCppName(SuperStruct);
     }
     Class << "\n{\npublic:\n";
 
     string Body;
     uint32_t Pos = SuperStruct.IsValid() ? SuperStruct.GetPropertySize() : 0;
-    
+
     // 遍历属性生成定义
-    for (const auto& prop : properties) {
+    for (const auto &prop : properties)
+    {
         string Type = prop.first;
         UField temp = prop.second;
         string Name = temp.GetName();
         uint32_t Offset = temp.Cast<UEProperty>().GetOffset();
-        uint32_t Size =temp.Cast<UEProperty>().GetElementSize();
+        uint32_t Size = temp.Cast<UEProperty>().GetElementSize();
 
         // 格式化属性行
         string PropLine = "    " + Type;
-        if (PropLine.size() < 50) {
+        if (PropLine.size() < 50)
+        {
             PropLine.append(50 - PropLine.size(), ' ');
         }
         PropLine += Name + ";";
-        
+
         // 格式化注释
-        if (PropLine.size() < 50) {
+        if (PropLine.size() < 50)
+        {
             PropLine.append(50 - PropLine.size(), ' ');
         }
         char Comment[128];
@@ -406,25 +474,28 @@ void DumpInfo::DumpClass(UObject addr, string out,unordered_set<string> &BasicEn
         PropLine += Comment;
 
         // 检查并添加填充字段
-        if (Pos < Offset) {
+        if (Pos < Offset)
+        {
             uint32_t diff = Offset - Pos;
             string PadLine = "    char";
-            if (PadLine.size() < 50) {
+            if (PadLine.size() < 50)
+            {
                 PadLine.append(50 - PadLine.size(), ' ');
             }
-            
+
             char PadName[128];
             sprintf(PadName, "pad_0x%04X[0x%04X];", Pos, diff);
             PadLine += PadName;
-            
-            if (PadLine.size() < 50) {
+
+            if (PadLine.size() < 50)
+            {
                 PadLine.append(50 - PadLine.size(), ' ');
             }
-            
+
             char PadComment[128];
             sprintf(PadComment, " // 0x%04X(0x%04X)\n", Pos, diff);
             PadLine += PadComment;
-            
+
             Body += PadLine;
         }
 
@@ -434,25 +505,28 @@ void DumpInfo::DumpClass(UObject addr, string out,unordered_set<string> &BasicEn
 
     // 添加尾部填充
     uint32_t TotalSize = tmp.GetPropertySize();
-    if (Pos < TotalSize) {
+    if (Pos < TotalSize)
+    {
         uint32_t diff = TotalSize - Pos;
         string PadLine = "    char";
-        if (PadLine.size() < 50) {
+        if (PadLine.size() < 50)
+        {
             PadLine.append(50 - PadLine.size(), ' ');
         }
-        
+
         char PadName[128];
         sprintf(PadName, "pad_0x%04X[0x%04X];", Pos, diff);
         PadLine += PadName;
-        
-        if (PadLine.size() < 50) {
+
+        if (PadLine.size() < 50)
+        {
             PadLine.append(50 - PadLine.size(), ' ');
         }
-        
+
         char PadComment[128];
         sprintf(PadComment, " // 0x%04X(0x%04X)\n", Pos, diff);
         PadLine += PadComment;
-        
+
         Body += PadLine;
     }
     // 写入主体并关闭类定义
@@ -475,66 +549,74 @@ void DumpInfo::DumpStruct(UObject addr, string out, unordered_set<string> &Basic
     unordered_set<string> headerIncludes;
     headerIncludes.insert("\"BasicTypes.h\""); // 公共基础头文件
     UEClass SuperStruct = tmp.GetSuperStruct().Cast<UEClass>();
-    if (SuperStruct.IsValid()) {
+    if (SuperStruct.IsValid())
+    {
         string superType = DumpUtils::GetCppName(SuperStruct);
         string baseType = DumpUtils::ExtractBaseType(superType);
-        
+
         // 基类总是需要包含头文件
-        if (!baseType.empty()) {
-            headerIncludes.insert("\"" + baseType + ".h\"");
+        if (!baseType.empty())
+        {
+            headerIncludes.insert(baseType);
         }
     }
     // 遍历属性收集类型
     vector<pair<string, UField>> properties; // <类型, 属性地址>
-    for (UField temp = tmp.GetChildProperties(); temp.IsValid(); temp =temp.GetNext()) {
+    for (UField temp = tmp.GetChildProperties(); temp.IsValid(); temp = temp.GetNext())
+    {
         string type = temp.GetType();
         properties.push_back({type, temp});
 
         // 提取基础类型名
         string baseType = DumpUtils::ExtractBaseType(type);
-        DumpUtils::NeedsHeader(baseType,BasicEngineTypes,headerIncludes);
+        DumpUtils::NeedsHeader(baseType, BasicEngineTypes, headerIncludes);
     }
 
     // 写入头文件包含
     Struct << "#pragma once\n\n";
-    for (const auto& include : headerIncludes) {
-        if(include.empty())
+    for (const auto &include : headerIncludes)
+    {
+        if (include.empty())
         {
             continue;
         }
-        Struct << "#include " << include << "\n";
+        Struct << "#include  \"" << include << ".h\"\n";
     }
     Struct << "\n";
     // 写入类头部信息
     Struct << "// Struct: " << tmp.Cast<UObject>().GetFullName() << "\n";
     Struct << "// Size: 0x" << hex << tmp.GetPropertySize() << dec << "\n\n";
-    
+
     Struct << "struct " << CppName;
-    if (SuperStruct.IsValid()) {
+    if (SuperStruct.IsValid())
+    {
         Struct << " : public " << DumpUtils::GetCppName(SuperStruct);
     }
     Struct << "\n{\npublic:\n";
 
     string Body;
     uint32_t Pos = SuperStruct.IsValid() ? SuperStruct.GetPropertySize() : 0;
-    
+
     // 遍历属性生成定义
-    for (const auto& prop : properties) {
+    for (const auto &prop : properties)
+    {
         string Type = prop.first;
         UField temp = prop.second;
         string Name = temp.GetName();
         uint32_t Offset = temp.Cast<UEProperty>().GetOffset();
-        uint32_t Size =temp.Cast<UEProperty>().GetElementSize();
+        uint32_t Size = temp.Cast<UEProperty>().GetElementSize();
 
         // 格式化属性行
         string PropLine = "    " + Type;
-        if (PropLine.size() < 50) {
+        if (PropLine.size() < 50)
+        {
             PropLine.append(50 - PropLine.size(), ' ');
         }
         PropLine += Name + ";";
-        
+
         // 格式化注释
-        if (PropLine.size() < 50) {
+        if (PropLine.size() < 50)
+        {
             PropLine.append(50 - PropLine.size(), ' ');
         }
         char Comment[128];
@@ -542,25 +624,28 @@ void DumpInfo::DumpStruct(UObject addr, string out, unordered_set<string> &Basic
         PropLine += Comment;
 
         // 检查并添加填充字段
-        if (Pos < Offset) {
+        if (Pos < Offset)
+        {
             uint32_t diff = Offset - Pos;
             string PadLine = "    char";
-            if (PadLine.size() < 50) {
+            if (PadLine.size() < 50)
+            {
                 PadLine.append(50 - PadLine.size(), ' ');
             }
-            
+
             char PadName[128];
             sprintf(PadName, "pad_0x%04X[0x%04X];", Pos, diff);
             PadLine += PadName;
-            
-            if (PadLine.size() < 50) {
+
+            if (PadLine.size() < 50)
+            {
                 PadLine.append(50 - PadLine.size(), ' ');
             }
-            
+
             char PadComment[128];
             sprintf(PadComment, " // 0x%04X(0x%04X)\n", Pos, diff);
             PadLine += PadComment;
-            
+
             Body += PadLine;
         }
 
@@ -570,25 +655,28 @@ void DumpInfo::DumpStruct(UObject addr, string out, unordered_set<string> &Basic
 
     // 添加尾部填充
     uint32_t TotalSize = tmp.GetPropertySize();
-    if (Pos < TotalSize) {
+    if (Pos < TotalSize)
+    {
         uint32_t diff = TotalSize - Pos;
         string PadLine = "    char";
-        if (PadLine.size() < 50) {
+        if (PadLine.size() < 50)
+        {
             PadLine.append(50 - PadLine.size(), ' ');
         }
-        
+
         char PadName[128];
         sprintf(PadName, "pad_0x%04X[0x%04X];", Pos, diff);
         PadLine += PadName;
-        
-        if (PadLine.size() < 50) {
+
+        if (PadLine.size() < 50)
+        {
             PadLine.append(50 - PadLine.size(), ' ');
         }
-        
+
         char PadComment[128];
         sprintf(PadComment, " // 0x%04X(0x%04X)\n", Pos, diff);
         PadLine += PadComment;
-        
+
         Body += PadLine;
     }
     // 写入主体并关闭类定义
@@ -614,19 +702,19 @@ void DumpInfo::DumpSDK(string out)
     ofstream BasicTypes(out + "/sdk/BasicTypes.h");
     unordered_set<string> BasicEngineTypes;
 
-    if (!Object.is_open()||!BasicTypes.is_open())
+    if (!Object.is_open() || !BasicTypes.is_open())
         return;
 
     cout << "Dumping Object List" << endl;
     clock_t begin = clock();
-    BasicTypes<<BasicTypes_h<<endl;
+    BasicTypes << BasicTypes_h << endl;
     g_dumpInfo.UStructStatic = UStruct::StaticClass();
     g_dumpInfo.UScriptStructStatic = UEScriptStruct::StaticClass();
     g_dumpInfo.UObjectStatic = UObject::StaticClass();
     g_dumpInfo.AActorStatic = AActor::StaticClass();
 
     uint32_t oCount = MemoryReader::Read<uint32_t>(g_dumpInfo.UObjectAddress + g_dumpInfo.offsets.NumElements);
-    cout << "Objects Counts: " << std::dec <<oCount << endl;
+    cout << "Objects Counts: " << std::dec << oCount << endl;
     ProgressBar progress(oCount);
     for (uint32_t i = 0; i < oCount; i++)
     {
@@ -635,19 +723,20 @@ void DumpInfo::DumpSDK(string out)
         {
             if (DumpUtils::IsA(uobj, DumpUtils::UStructFlag))
             {
-                DumpInfo::DumpClass(uobj, out + "/sdk",BasicEngineTypes);
+                DumpInfo::DumpClass(uobj, out + "/sdk", BasicEngineTypes);
             }
-            else if(DumpUtils::IsA(uobj, DumpUtils::UScriptStructFlag))
+            else if (DumpUtils::IsA(uobj, DumpUtils::UScriptStructFlag))
             {
-                DumpInfo::DumpStruct(uobj,out + "/sdk",BasicEngineTypes);
+                DumpInfo::DumpStruct(uobj, out + "/sdk", BasicEngineTypes);
             }
-            //TODO dump enum func
+            // TODO dump enum func
             Object << "{" << std::right << std::setw(6) << std::setfill('0') << i << "}\t[" << uobj.GetAddress() << "]\t" << uobj.GetName() << "\t" << uobj.GetFullName() << endl;
             classCount++;
         }
         progress.update(i);
     }
-    for (const auto& Type : BasicEngineTypes) {
+    for (const auto &Type : BasicEngineTypes)
+    {
         BasicTypes << Type << endl;
     }
     progress.finish();

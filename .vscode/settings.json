@@ -61,6 +61,10 @@
         "fstream": "cpp",
         "iomanip": "cpp",
         "list": "cpp",
-        "filesystem": "cpp"
+        "filesystem": "cpp",
+        "__tree": "cpp",
+        "codecvt": "cpp",
+        "map": "cpp",
+        "set": "cpp"
     }
 }
